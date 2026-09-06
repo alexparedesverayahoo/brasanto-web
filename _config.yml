@@ -1,0 +1,5 @@
+# GitHub Pages: no publicar la carpeta de trabajo `fuentes/`.
+# Los archivos siguen versionados en el repo, pero no se sirven en el sitio.
+exclude:
+  - fuentes
+  
