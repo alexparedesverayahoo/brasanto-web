@@ -115,26 +115,62 @@
     window.addEventListener('resize', onScroll);
     paint();
 
-    /* El video del plato: autoplay silencioso, tolerante a políticas del navegador */
+    /* El video del plato: se reproduce UNA sola vez y se retira.
+       Al terminar, se desvanece y deja ver la foto del plato con las cremas. */
     root.querySelectorAll('[data-plate-video="1"]').forEach(function (el) {
       if (el.__bzWired) return;
       el.__bzWired = true;
+
       el.muted = true;
       el.defaultMuted = true;
       el.playsInline = true;
-      el.loop = true;
+      el.loop = false;          /* una vez y punto */
       el.autoplay = true;
       el.setAttribute('muted', '');
       el.setAttribute('playsinline', '');
-      var play = function () { var q = el.play(); if (q && q.catch) q.catch(function () {}); };
+
+      var done = false;         /* ya terminó: no se vuelve a lanzar nunca */
+      var started = false;
+      var unlockEvents = ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'];
+
+      var play = function () {
+        if (done) return;
+        var q = el.play();
+        if (q && q.catch) q.catch(function () {});
+      };
+
+      /* Los listeners de desbloqueo existen solo para sortear el autoplay
+         bloqueado. En cuanto arranca de verdad, se retiran: si no, cada scroll
+         reiniciaría el video. */
+      var releaseUnlock = function () {
+        unlockEvents.forEach(function (ev) { window.removeEventListener(ev, play); });
+      };
+
       el.addEventListener('canplay', play);
-      el.addEventListener('playing', function () { el.style.opacity = '1'; });
-      play();
-      ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'].forEach(function (ev) {
+      el.addEventListener('playing', function () {
+        started = true;
+        el.style.opacity = '1';
+        releaseUnlock();
+      });
+
+      el.addEventListener('ended', function () {
+        done = true;
+        releaseUnlock();
+        el.style.opacity = '0';   /* deja ver el plato debajo */
+      });
+
+      unlockEvents.forEach(function (ev) {
         window.addEventListener(ev, play, { passive: true });
       });
+      play();
+
+      /* Fuera de pantalla se pausa; al volver solo retoma si aún no terminó. */
       new IntersectionObserver(function (es) {
-        es.forEach(function (en) { if (en.isIntersecting) play(); else el.pause(); });
+        es.forEach(function (en) {
+          if (done) return;
+          if (en.isIntersecting) play();
+          else if (started) el.pause();
+        });
       }, { threshold: 0.05 }).observe(el);
     });
   }
