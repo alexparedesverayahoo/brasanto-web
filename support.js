@@ -1,5 +1,5 @@
 /* BRASANTO — comportamiento de la página.
-   Recuperado del componente de Claude Design y adaptado a JS estándar. */
+   Sin dependencias. Todo es mejora progresiva: sin JS la página se lee completa. */
 (function () {
   'use strict';
 
@@ -7,6 +7,29 @@
     var root = document.querySelector('[data-root="1"]');
     if (!root) return;
     var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* style-hover → reglas CSS reales.
+       El export de diseño escribe los estados hover en un atributo que el
+       navegador ignora. Aquí se convierten en :hover/:focus-visible con
+       !important para que ganen a los estilos en línea. */
+    var hoverRules = [];
+    root.querySelectorAll('[style-hover]').forEach(function (el, i) {
+      var decl = (el.getAttribute('style-hover') || '')
+        .split(';')
+        .map(function (d) { return d.trim(); })
+        .filter(Boolean)
+        .map(function (d) { return d.replace(/\s*!important\s*$/i, '') + ' !important'; })
+        .join('; ');
+      if (!decl) return;
+      var cls = 'bz-h' + i;
+      el.classList.add(cls);
+      hoverRules.push('@media (hover:hover) { .' + cls + ':hover { ' + decl + '; } } .' + cls + ':focus-visible { ' + decl + '; }');
+    });
+    if (hoverRules.length) {
+      var sheet = document.createElement('style');
+      sheet.textContent = hoverRules.join('\n');
+      document.head.appendChild(sheet);
+    }
 
     /* Brasas sobre el hero */
     var box = root.querySelector('[data-embers="1"]');
@@ -24,18 +47,32 @@
       }
     }
 
-    /* Aparición al entrar en viewport */
+    /* Aparición al entrar en viewport.
+       Al terminar, se devuelve la transición original del elemento
+       (las tarjetas la necesitan para su hover). */
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (en) {
         if (!en.isIntersecting) return;
-        en.target.style.opacity = '1';
-        en.target.style.transform = 'none';
-        io.unobserve(en.target);
+        var el = en.target;
+        el.style.opacity = '1';
+        el.style.transform = 'none';
+        io.unobserve(el);
+        var done = false;
+        var restore = function (ev) {
+          if (ev && ev.target !== el) return;
+          if (done) return;
+          done = true;
+          el.removeEventListener('transitionend', restore);
+          el.style.transition = el.__bzTransition || '';
+        };
+        el.addEventListener('transitionend', restore);
+        setTimeout(restore, 1500);
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -6% 0px' });
 
     root.querySelectorAll('[data-reveal="1"]').forEach(function (el, i) {
       var d = ((i % 3) * 0.09).toFixed(2);
+      el.__bzTransition = el.style.transition;
       el.style.opacity = '0';
       el.style.transform = 'translateY(34px)';
       el.style.transition =
@@ -51,33 +88,51 @@
       card.addEventListener('mouseleave', function () { img.style.transform = 'none'; });
     });
 
-    /* Scroll: barra de progreso, nav, secuencia del plato, CTA flotante */
+    /* Menú móvil */
     var nav = root.querySelector('[data-nav="1"]');
+    var burger = root.querySelector('[data-burger="1"]');
+    var navLinks = root.querySelector('[data-navlinks="1"]');
+    var raf = 0;
+    var paint; /* se define abajo; setMenu la necesita para pintar el fondo del nav */
+
+    var menuOpen = function () { return !!(nav && nav.hasAttribute('data-nav-open')); };
+    var setMenu = function (open) {
+      if (!nav || !burger) return;
+      if (open) nav.setAttribute('data-nav-open', '1'); else nav.removeAttribute('data-nav-open');
+      if (!open && navLinks && navLinks.contains(document.activeElement)) burger.focus();
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      burger.setAttribute('aria-label', open ? 'Cerrar el menú' : 'Abrir el menú');
+      var o = burger.querySelector('[data-burger-open="1"]');
+      var c = burger.querySelector('[data-burger-close="1"]');
+      if (o) o.style.display = open ? 'none' : '';
+      if (c) c.style.display = open ? '' : 'none';
+      if (paint) paint();
+    };
+    if (burger) {
+      burger.addEventListener('click', function () { setMenu(!menuOpen()); });
+      if (navLinks) {
+        navLinks.addEventListener('click', function (ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('a')) setMenu(false);
+        });
+      }
+      document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && menuOpen()) setMenu(false); });
+      window.addEventListener('resize', function () { if (window.innerWidth >= 860 && menuOpen()) setMenu(false); });
+      document.addEventListener('click', function (ev) { if (menuOpen() && !nav.contains(ev.target)) setMenu(false); });
+      window.addEventListener('scroll', function () { if (menuOpen()) setMenu(false); }, { passive: true });
+    }
+
+    /* Scroll: barra de progreso, estado del nav, CTA flotante */
     var bar = root.querySelector('[data-progress="1"]');
     var float = root.querySelector('[data-float="1"]');
-    var plate = root.querySelector('[data-plate="1"]');
-    var frames = plate ? Array.prototype.slice.call(plate.querySelectorAll('[data-frame]')) : [];
-    var tags = plate ? Array.prototype.slice.call(plate.querySelectorAll('[data-tag]')) : [];
-    var bars = plate ? Array.prototype.slice.call(plate.querySelectorAll('[data-bar]')) : [];
-    var thresholds = [0.40, 0.55, 0.72];
 
-    /* El menú se colapsa en pantallas angostas */
-    var navLinks = root.querySelector('[data-navlinks="1"]');
-    var fitNav = function () {
-      if (navLinks) navLinks.style.display = window.innerWidth < 860 ? 'none' : 'flex';
-    };
-    fitNav();
-    window.addEventListener('resize', fitNav);
-
-    var raf = 0;
-    var paint = function () {
+    paint = function () {
       raf = 0;
       var y = window.scrollY || 0;
       var max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
       if (bar) bar.style.transform = 'scaleX(' + (y / max).toFixed(4) + ')';
 
       if (nav) {
-        var on = y > 40;
+        var on = y > 40 || menuOpen();
         nav.style.height = on ? '76px' : '96px';
         nav.style.background = on ? 'rgba(20,16,14,.82)' : 'transparent';
         nav.style.backdropFilter = on ? 'blur(14px)' : 'none';
@@ -89,25 +144,8 @@
         float.style.opacity = vis ? '1' : '0';
         float.style.transform = vis ? 'none' : 'translateY(14px)';
         float.style.pointerEvents = vis ? 'auto' : 'none';
-      }
-
-      if (plate && frames.length) {
-        var rect = plate.getBoundingClientRect();
-        var span = plate.offsetHeight - window.innerHeight;
-        var p = Math.min(1, Math.max(0, -rect.top / Math.max(1, span)));
-        var idx = p < 0.33 ? 0 : p < 0.66 ? 1 : 2;
-        frames.forEach(function (f, i) { f.style.opacity = i === idx ? '1' : '0'; });
-
-        tags.forEach(function (t, i) {
-          var on2 = p > thresholds[i];
-          var base = i === 2 ? 'translate(-50%,' : 'translateY(';
-          t.style.opacity = on2 ? '1' : '0';
-          t.style.transform = on2 ? (i === 2 ? 'translate(-50%,0)' : 'none') : base + '18px)';
-        });
-        bars.forEach(function (b, i) {
-          var local = Math.min(1, Math.max(0, (p - i / 3) * 3));
-          b.style.transform = 'scaleX(' + local.toFixed(3) + ')';
-        });
+        float.style.visibility = vis ? 'visible' : 'hidden';
+        float.setAttribute('aria-hidden', vis ? 'false' : 'true');
       }
     };
     var onScroll = function () { if (!raf) raf = requestAnimationFrame(paint); };
@@ -115,8 +153,9 @@
     window.addEventListener('resize', onScroll);
     paint();
 
-    /* El video del plato: se reproduce UNA sola vez y se retira.
-       Al terminar, se desvanece y deja ver la foto del plato con las cremas. */
+    /* El video del plato: en loop, silencioso, solo mientras está en pantalla.
+       La fuente se elige según pantalla y soporte: clip ligero en móvil,
+       webm donde se pueda, mp4 en el resto. Con reduced-motion queda el póster. */
     root.querySelectorAll('[data-plate-video="1"]').forEach(function (el) {
       if (el.__bzWired) return;
       el.__bzWired = true;
@@ -124,52 +163,49 @@
       el.muted = true;
       el.defaultMuted = true;
       el.playsInline = true;
-      el.loop = false;          /* una vez y punto */
-      el.autoplay = true;
+      el.loop = true;
       el.setAttribute('muted', '');
       el.setAttribute('playsinline', '');
+      if (reduce) return;
 
-      var done = false;         /* ya terminó: no se vuelve a lanzar nunca */
-      var started = false;
-      var unlockEvents = ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'];
+      var mobile = el.getAttribute('data-src-mobile');
+      var webm = el.getAttribute('data-src-webm');
+      var mp4 = el.getAttribute('data-src-mp4');
+      var webmOk = !!(webm && el.canPlayType && el.canPlayType('video/webm; codecs="vp9"') === 'probably');
+      var src = (window.innerWidth < 720 && mobile) || (webmOk ? webm : mp4);
+      if (src && el.getAttribute('src') !== src) {
+        el.src = src;
+        el.load();
+      }
 
+      var visible = false;
       var play = function () {
-        if (done) return;
+        if (!visible) return;
         var q = el.play();
         if (q && q.catch) q.catch(function () {});
       };
 
-      /* Los listeners de desbloqueo existen solo para sortear el autoplay
-         bloqueado. En cuanto arranca de verdad, se retiran: si no, cada scroll
-         reiniciaría el video. */
+      /* Los listeners de desbloqueo solo existen para sortear el autoplay
+         bloqueado. En cuanto arranca de verdad, se retiran. */
+      var unlockEvents = ['pointerdown', 'touchstart', 'keydown', 'scroll', 'wheel'];
       var releaseUnlock = function () {
         unlockEvents.forEach(function (ev) { window.removeEventListener(ev, play); });
       };
-
+      el.addEventListener('playing', releaseUnlock);
+      /* Si la fuente elegida falla (códec no soportado), se cae al mp4. */
+      el.addEventListener('error', function () {
+        if (mp4 && el.getAttribute('src') !== mp4) { el.src = mp4; el.load(); play(); }
+      });
       el.addEventListener('canplay', play);
-      el.addEventListener('playing', function () {
-        started = true;
-        el.style.opacity = '1';
-        releaseUnlock();
-      });
-
-      el.addEventListener('ended', function () {
-        done = true;
-        releaseUnlock();
-        el.style.opacity = '0';   /* deja ver el plato debajo */
-      });
-
       unlockEvents.forEach(function (ev) {
         window.addEventListener(ev, play, { passive: true });
       });
-      play();
 
-      /* Fuera de pantalla se pausa; al volver solo retoma si aún no terminó. */
       new IntersectionObserver(function (es) {
         es.forEach(function (en) {
-          if (done) return;
-          if (en.isIntersecting) play();
-          else if (started) el.pause();
+          visible = en.isIntersecting;
+          if (visible) play();
+          else if (!el.paused) el.pause();
         });
       }, { threshold: 0.05 }).observe(el);
     });
